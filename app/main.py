@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -14,14 +15,28 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Contract feature usage statistics and recommendation service for e-Arzuhal",
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
+# CORS — izin verilen origin'ler env'den okunur (default: main-server)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=settings.allowed_origins_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Internal API key kontrolü. INTERNAL_API_KEY set edilmemişse (dev) pas geçer."""
+    if request.url.path in ("/health", "/"):
+        return await call_next(request)
+    if settings.internal_api_key and request.headers.get("X-Internal-API-Key") != settings.internal_api_key:
+        return JSONResponse(status_code=401, content={"detail": "Geçersiz veya eksik API anahtarı"})
+    return await call_next(request)
 
 
 @app.on_event("startup")
