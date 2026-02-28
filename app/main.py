@@ -1,11 +1,13 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from .config import get_settings
 from .database import get_db, create_tables
-from .schemas import AnalyzeRequest, AnalyzeResponse, StatsResponse, HealthResponse, FeatureStat
-from .crud import create_record, get_stats
+from .schemas import (AnalyzeRequest, AnalyzeResponse, StatsResponse, HealthResponse,
+                      FeatureStat, ExplanationSupportResponse, ClauseUsageStat)
+from .crud import create_record, get_stats, get_explanation_support
 from .services.recommendation import compute_recommendations
 
 settings = get_settings()
@@ -14,14 +16,28 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Contract feature usage statistics and recommendation service for e-Arzuhal",
+    docs_url="/docs" if settings.debug else None,
+    redoc_url="/redoc" if settings.debug else None,
 )
 
+# CORS — izin verilen origin'ler env'den okunur (default: main-server)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
+    allow_origins=settings.allowed_origins_list,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    """Internal API key kontrolü. INTERNAL_API_KEY set edilmemişse (dev) pas geçer."""
+    if request.url.path in ("/health", "/"):
+        return await call_next(request)
+    if settings.internal_api_key and request.headers.get("X-Internal-API-Key") != settings.internal_api_key:
+        return JSONResponse(status_code=401, content={"detail": "Geçersiz veya eksik API anahtarı"})
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -93,4 +109,40 @@ def get_contract_stats(contract_type: str, db: Session = Depends(get_db)):
         total_contracts=stats["total"],
         feature_stats=feature_stats,
         avg_completeness=stats["avg_completeness"],
+    )
+
+
+@app.get("/stats/{contract_type}/explanation-support",
+         response_model=ExplanationSupportResponse,
+         tags=["Statistics"])
+def get_explanation_support_stats(contract_type: str, db: Session = Depends(get_db)):
+    """
+    Madde açıklama sistemi için istatistiksel destek verisi.
+    Clause kullanım oranları, opsiyonel madde seçim oranı ve onay tamamlanma oranını döner.
+    UI ve ExplanationService tarafından kullanılır.
+    """
+    data = get_explanation_support(db, contract_type)
+    total = data["total"]
+
+    clause_usage = [
+        ClauseUsageStat(
+            clause=name,
+            count=count,
+            total=total,
+            usage_percentage=round((count / total) * 100, 1) if total > 0 else 0.0,
+        )
+        for name, count in sorted(
+            data["feature_counts"].items(),
+            key=lambda x: x[1],
+            reverse=True,
+        )
+    ]
+
+    return ExplanationSupportResponse(
+        contract_type=contract_type,
+        total_contracts=total,
+        avg_completeness=data["avg_completeness"],
+        clause_usage=clause_usage,
+        optional_clause_selection_rate=data["optional_clause_selection_rate"],
+        approval_completion_rate=data["approval_completion_rate"],
     )

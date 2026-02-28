@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Float, JSON, DateTime, func
+from sqlalchemy import Column, BigInteger, String, Float, JSON, DateTime, Integer, Boolean, func
 from .database import Base
 
 
@@ -11,3 +11,15 @@ class ContractRecord(Base):
     fields = Column(JSON, nullable=False, default=dict)     # extracted field key-value pairs
     completeness_score = Column(Float, nullable=True)
     analyzed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # ── Hafta 2: Açıklama & İstatistik Zenginleştirme ────────────────────────
+    # Her madde için {clause, reason, law_reference, necessity} listesi
+    clause_data = Column(JSON, nullable=True)
+
+    # Kullanıcıya sunulan opsiyonel madde sayısı
+    optional_clauses_offered = Column(Integer, nullable=True, default=0)
+    # Kullanıcının seçtiği opsiyonel madde sayısı
+    optional_clauses_selected = Column(Integer, nullable=True, default=0)
+
+    # Onay tamamlandı mı? (sözleşme COMPLETED durumuna geçtiğinde True)
+    approval_completed = Column(Boolean, nullable=True)
