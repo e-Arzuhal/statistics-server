@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -8,6 +8,12 @@ class AnalyzeRequest(BaseModel):
     features: list[str] = Field(default=[], description="Feature names present in this contract")
     fields: dict = Field(default={}, description="Extracted field values")
     completeness_score: Optional[float] = Field(None, ge=0, le=100)
+
+    # ── Hafta 2 ──────────────────────────────────────────────────────────────
+    # [{clause, reason, law_reference, necessity}]
+    clause_data: Optional[List[Dict[str, Any]]] = Field(default=None)
+    optional_clauses_offered: int = Field(default=0, ge=0)
+    optional_clauses_selected: int = Field(default=0, ge=0)
 
 
 class FeatureRecommendation(BaseModel):
@@ -42,3 +48,32 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     service: str
+
+
+# ── Hafta 2: Açıklama Desteği ────────────────────────────────────────────────
+
+class ClauseUsageStat(BaseModel):
+    """Bir sözleşme maddesinin kullanım istatistiği."""
+    clause: str
+    usage_percentage: float
+    count: int
+    total: int
+
+
+class ExplanationSupportResponse(BaseModel):
+    """
+    GET /stats/{contract_type}/explanation-support endpoint yanıtı.
+    UI ve ExplanationService'e istatistiksel destek verisi sağlar.
+    """
+    contract_type: str
+    total_contracts: int
+    avg_completeness: Optional[float]
+
+    # Madde kullanım oranları (feature_counts'tan türetilir)
+    clause_usage: List[ClauseUsageStat]
+
+    # Opsiyonel madde seçim oranı (0.0–1.0); veri yoksa null
+    optional_clause_selection_rate: Optional[float]
+
+    # Onay tamamlanma oranı (0.0–1.0); veri yoksa null
+    approval_completion_rate: Optional[float]
