@@ -4,14 +4,14 @@ from datetime import datetime
 
 
 class AnalyzeRequest(BaseModel):
-    contract_type: str = Field(..., description="Type of the contract (e.g. kira_sozlesmesi)")
-    features: list[str] = Field(default=[], description="Feature names present in this contract")
-    fields: dict = Field(default={}, description="Extracted field values")
+    contract_type: str = Field(..., min_length=1, max_length=64, description="Type of the contract (e.g. kira_sozlesmesi)")
+    features: list[str] = Field(default_factory=list, max_length=200, description="Feature names present in this contract")
+    fields: dict = Field(default_factory=dict, max_length=200, description="Extracted field values")
     completeness_score: Optional[float] = Field(None, ge=0, le=100)
 
     # ── Hafta 2 ──────────────────────────────────────────────────────────────
     # [{clause, reason, law_reference, necessity}]
-    clause_data: Optional[List[Dict[str, Any]]] = Field(default=None)
+    clause_data: Optional[List[Dict[str, Any]]] = Field(default=None, max_length=200)
     optional_clauses_offered: int = Field(default=0, ge=0)
     optional_clauses_selected: int = Field(default=0, ge=0)
 
