@@ -1,60 +1,64 @@
 # e-Arzuhal – Statistics Service
 
-Contract feature usage statistics and recommendation microservice.
+Sözleşme özellik kullanım istatistikleri ve öneri mikroservisi.
 
 ---
 
-## Overview
+## Genel Bakış
 
-This FastAPI service tracks which features (clauses, fields) appear in contracts of each type. When a new contract is analyzed, it:
+Bu FastAPI servisi her sözleşme tipinde hangi özelliklerin (maddeler, alanlar) kullanıldığını takip eder. Yeni bir sözleşme analiz edildiğinde:
 
-1. Stores the contract's feature set in the database
-2. Computes which features are commonly present in similar contracts (>= 30% usage)
-3. Returns **recommendations** for features the current contract is missing
+1. Sözleşmenin özellik kümesini veritabanına kaydeder
+2. Benzer sözleşmelerde yaygın olan özellikleri hesaplar (≥ %30 kullanım)
+3. Mevcut sözleşmede eksik olan özellikler için **öneriler** döner
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
+| Katman | Teknoloji |
+|--------|-----------|
 | Language | Python 3.11+ |
 | Framework | FastAPI 0.115 |
 | ORM | SQLAlchemy 2.0 |
 | Migrations | Alembic 1.14 |
-| DB (dev) | SQLite |
+| DB (dev) | SQLite (`statistics.db` — gitignore'da) |
 | DB (prod) | PostgreSQL 16 |
 | Validation | Pydantic v2 |
 | Testing | pytest + httpx |
 
 ---
 
-## Quick Start (Development)
+## Kurulum
 
 ```bash
 cd statistics-server
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+venv\Scripts\activate   # Windows
+# source venv/bin/activate  # Linux/macOS
 pip install -r requirements.txt
+cp .env.example .env
 uvicorn app.main:app --reload --port 8002
 ```
 
-SQLite database is created automatically at `./statistics.db`.
+SQLite veritabanı `./statistics.db` konumunda otomatik oluşturulur.
+Bu dosya `.gitignore`'da tanımlıdır — commit edilmez.
 
 ---
 
 ## API Endpoints
 
-### `GET /health`
+### GET /health
+
 ```json
 { "status": "ok", "version": "1.0.0", "service": "e-Arzuhal Statistics Service" }
 ```
 
-### `POST /contracts/analyze`
+### POST /contracts/analyze
 
-Store a contract record and receive feature recommendations.
+Sözleşme kaydını sakla ve önerileri al.
 
-**Request:**
+**İstek:**
 ```json
 {
   "contract_type": "kira_sozlesmesi",
@@ -64,7 +68,7 @@ Store a contract record and receive feature recommendations.
 }
 ```
 
-**Response:**
+**Yanıt:**
 ```json
 {
   "contract_type": "kira_sozlesmesi",
@@ -73,9 +77,7 @@ Store a contract record and receive feature recommendations.
     {
       "feature_name": "sozlesme_suresi",
       "usage_percentage": 87.5,
-      "count": 7,
-      "total": 8,
-      "message": "Bu alan benzer sozlesmelerin %87.5'inde yer aliyor. Eklemeyi dusunebilirsiniz."
+      "message": "Bu alan benzer sözleşmelerin %87.5'inde yer alıyor."
     }
   ],
   "stats_summary": {
@@ -85,114 +87,67 @@ Store a contract record and receive feature recommendations.
 }
 ```
 
-### `GET /stats/{contract_type}`
+### GET /stats/{contract_type}
 
-Get aggregated statistics for a contract type.
+Sözleşme tipi için istatistikleri getir.
 
-**Response:**
-```json
-{
-  "contract_type": "kira_sozlesmesi",
-  "total_contracts": 42,
-  "feature_stats": [
-    { "feature_name": "kira_bedeli", "count": 42, "usage_percentage": 100.0 },
-    { "feature_name": "depozito", "count": 38, "usage_percentage": 90.5 }
-  ],
-  "avg_completeness": 78.4
-}
+---
+
+## Öneri Mantığı
+
+```
+usage_percentage = (bu_ozellige_sahip_sozlesmeler / ayni_tipteki_toplam) x 100
+
+Öneri koşulları:
+  usage_percentage >= threshold (varsayılan: %30)
+  AND özellik mevcut sözleşmede YOK
+
+Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan: 5)
 ```
 
 ---
 
-## Recommendation Logic
+## Ortam Değişkenleri
 
-```
-usage_percentage = (contracts_with_feature / total_contracts_of_same_type) x 100
-
-Recommend if:
-  usage_percentage >= threshold (default: 30%)
-  AND feature is NOT already present in the current contract
-
-Sort by usage_percentage descending, return top N (default: 5)
-```
-
-Configurable via environment variables:
-- `RECOMMENDATION_THRESHOLD` — percentage threshold (default: `30.0`)
-- `RECOMMENDATION_TOP_N` — max recommendations returned (default: `5`)
+| Değişken | Varsayılan | Açıklama |
+|----------|-----------|----------|
+| `DATABASE_URL` | `sqlite:///./statistics.db` | DB bağlantı dizesi |
+| `DEBUG` | `true` | Swagger UI + detaylı log |
+| `ALLOWED_ORIGINS` | `http://localhost:8080` | CORS whitelist |
+| `INTERNAL_API_KEY` | _(boş)_ | Prod'da main-server ile aynı olmalı |
+| `RECOMMENDATION_THRESHOLD` | `30.0` | Öneri eşiği (%) |
+| `RECOMMENDATION_TOP_N` | `5` | Maks öneri sayısı |
 
 ---
 
-## Environment Variables
+## Güvenlik
 
-`.env.example` dosyasindan kopyalayin:
+- `ALLOWED_ORIGINS` prod'da yalnızca `main-server` adresi olmalı — frontend doğrudan erişemez.
+- `INTERNAL_API_KEY` set edilmemişse (dev) kontrol atlanır; set edilmişse `X-Internal-API-Key` header zorunlu.
+- `DEBUG=false` (prod): Swagger devre dışı.
+
+---
+
+## Testler
 
 ```bash
-cp .env.example .env
-```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | `sqlite:///./statistics.db` | DB baglanti dizesi |
-| `DEBUG` | `true` | Swagger UI + detayli log |
-| `ALLOWED_ORIGINS` | `http://localhost:8080` | CORS whitelist (virgülle ayrilmis) |
-| `INTERNAL_API_KEY` | _(bos)_ | Servisler arasi API anahtari |
-| `RECOMMENDATION_THRESHOLD` | `30.0` | Oneri esigi (%) |
-| `RECOMMENDATION_TOP_N` | `5` | Maks oneri sayisi |
-
----
-
-## Security
-
-### CORS
-
-`ALLOWED_ORIGINS` environment variable ile izin verilen origin'ler belirlenir.
-Production'da yalnizca `main-server` adresini ekleyin — frontend dogrudan bu servise erisemez:
-
-```
-ALLOWED_ORIGINS=http://main-server:8080
-```
-
-### Internal API Key Middleware
-
-- `INTERNAL_API_KEY` **set edilmemisse** (dev): kontrol atlanir.
-- **Set edilmisse** (prod): `X-Internal-API-Key` header'i eslesmeyen istekler `401` alir.
-- `/health` endpoint'i her zaman serbest.
-
-`main-server`'in `INTERNAL_API_KEY` degeriyle ayni olmalidir:
-
-```bash
-# Uretmek icin:
-openssl rand -hex 32
-```
-
-### Swagger UI
-
-- `DEBUG=true`: `/docs` erisilebilir.
-- `DEBUG=false` (prod): Swagger devre disi.
-
----
-
-## Running Tests
-
-```bash
-pip install -r requirements.txt
 pytest tests/ -v
 ```
 
 ---
 
-## Main Server Integration
+## main-server Entegrasyonu
 
-The main Spring Boot server (`main-server`) calls this service from `StatisticsService.java`:
+`main-server`'daki `StatisticsService.java` bu servisi çağırır:
 
 ```
 POST http://localhost:8002/contracts/analyze
 ```
 
-This is triggered after a contract is analyzed by the NLP + GraphRAG pipeline, passing the detected features and completeness score.
+NLP + GraphRAG pipeline'ı tamamlandıktan sonra tespit edilen özellikler ve tamamlanma skoru iletilir.
 
 ---
 
 ## Maintainer
 
-e-Arzuhal Team -- Statistics & Recommendation Service
+e-Arzuhal Team — Statistics & Recommendation Service
