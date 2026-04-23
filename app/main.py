@@ -1,9 +1,14 @@
+import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from .config import get_settings
 from .database import get_db, create_tables
@@ -37,6 +42,23 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def observability_middleware(request: Request, call_next):
+    """Her isteği X-Request-ID ve süre ile loglar; response'a request-id ekler."""
+    if request.url.path in ("/health", "/"):
+        return await call_next(request)
+    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    start = time.time()
+    response = await call_next(request)
+    elapsed_ms = int((time.time() - start) * 1000)
+    logger.info(
+        "http_request service=statistics method=%s path=%s status=%d ms=%d request_id=%s",
+        request.method, request.url.path, response.status_code, elapsed_ms, request_id,
+    )
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.middleware("http")

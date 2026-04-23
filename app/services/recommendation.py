@@ -38,6 +38,7 @@ def compute_recommendations(
                     count=count,
                     total=total,
                     message=f"Bu alan benzer sözleşmelerin %{round(usage_pct, 1)}'inde yer alıyor. Eklemeyi düşünebilirsiniz.",
+                    reason=f"statistical_frequency:{round(usage_pct, 1)}%_of_{total}_contracts",
                 )
             )
 

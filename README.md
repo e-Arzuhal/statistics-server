@@ -77,7 +77,10 @@ Sözleşme kaydını sakla ve önerileri al.
     {
       "feature_name": "sozlesme_suresi",
       "usage_percentage": 87.5,
-      "message": "Bu alan benzer sözleşmelerin %87.5'inde yer alıyor."
+      "count": 7,
+      "total": 8,
+      "message": "Bu alan benzer sözleşmelerin %87.5'inde yer alıyor. Eklemeyi düşünebilirsiniz.",
+      "reason": "statistical_frequency:87.5%_of_8_contracts"
     }
   ],
   "stats_summary": {
@@ -93,17 +96,45 @@ Sözleşme tipi için istatistikleri getir.
 
 ---
 
-## Öneri Mantığı
+## Öneri Mantığı (Açıklanabilir AI)
 
 ```
 usage_percentage = (bu_ozellige_sahip_sozlesmeler / ayni_tipteki_toplam) x 100
 
 Öneri koşulları:
-  usage_percentage >= threshold (varsayılan: %30)
+  usage_percentage >= threshold (varsayılan: %30, env: RECOMMENDATION_THRESHOLD)
   AND özellik mevcut sözleşmede YOK
 
 Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan: 5)
 ```
+
+Her öneri, neden üretildiğini makine tarafından okunabilir `reason` alanıyla döner:
+```
+"reason": "statistical_frequency:87.5%_of_8_contracts"
+```
+Bu alan UI'da "Bu madde neden önerildi?" sorusuna cevap verir ve jüri sunumunda açıklanabilir AI kanıtı olarak kullanılabilir.
+
+## Veritabanı Profilleri
+
+| Ortam | `DATABASE_URL` | Notlar |
+|-------|---------------|--------|
+| development | `sqlite:///./statistics.db` | Sıfır kurulum |
+| production | `postgresql://user:pass@host/db` | `APP_ENV=production` iken SQLite yasak; config.py hata fırlatır |
+
+Migration çalıştırma:
+```bash
+alembic upgrade head     # son migration'ı uygula
+alembic history          # migration geçmişi
+alembic downgrade -1     # bir geri al
+```
+
+## Observability
+
+Her istek `X-Request-ID` ile loglanır:
+```
+INFO  http_request service=statistics method=POST path=/contracts/analyze status=200 ms=12 request_id=3fa2c1d8
+```
+Aynı `request_id`, main-server ve diğer servislerin loglarında da görünür (dağıtık istek izleme).
 
 ---
 

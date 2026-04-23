@@ -22,6 +22,7 @@ class FeatureRecommendation(BaseModel):
     count: int
     total: int
     message: str
+    reason: str  # Makine tarafından okunabilir neden kodu (jüri: açıklanabilir AI)
 
 
 class AnalyzeResponse(BaseModel):
