@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     app_name: str = "e-Arzuhal Statistics Service"
     app_version: str = "1.0.0"
     debug: bool = True
+    app_env: str = "development"
 
     database_url: str = "sqlite:///./statistics.db"
 
@@ -28,4 +29,15 @@ class Settings(BaseSettings):
 
 @lru_cache()
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+
+    if settings.app_env.lower() == "production" and "*" in settings.allowed_origins_list:
+        raise ValueError("In production, ALLOWED_ORIGINS cannot include '*'.")
+
+    if settings.app_env.lower() == "production" and not settings.database_url.startswith("postgresql"):
+        raise ValueError("In production, DATABASE_URL must use PostgreSQL.")
+
+    if settings.app_env.lower() == "production" and not settings.internal_api_key:
+        raise ValueError("In production, INTERNAL_API_KEY must be set.")
+
+    return settings

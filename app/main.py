@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -12,10 +14,17 @@ from .services.recommendation import compute_recommendations
 
 settings = get_settings()
 
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    create_tables()
+    yield
+
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description="Contract feature usage statistics and recommendation service for e-Arzuhal",
+    lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
     redoc_url="/redoc" if settings.debug else None,
 )
@@ -32,17 +41,18 @@ app.add_middleware(
 
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    """Internal API key kontrolü. INTERNAL_API_KEY set edilmemişse (dev) pas geçer."""
+    """Internal API key kontrolü. Debug dışı ortamlarda zorunludur."""
     if request.url.path in ("/health", "/"):
         return await call_next(request)
-    if settings.internal_api_key and request.headers.get("X-Internal-API-Key") != settings.internal_api_key:
+
+    if not settings.internal_api_key:
+        if settings.debug:
+            return await call_next(request)
+        return JSONResponse(status_code=503, content={"detail": "Server misconfigured: INTERNAL_API_KEY is required"})
+
+    if request.headers.get("X-Internal-API-Key") != settings.internal_api_key:
         return JSONResponse(status_code=401, content={"detail": "Geçersiz veya eksik API anahtarı"})
     return await call_next(request)
-
-
-@app.on_event("startup")
-def on_startup():
-    create_tables()
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Health"])
