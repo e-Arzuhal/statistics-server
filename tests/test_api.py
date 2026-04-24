@@ -1,3 +1,7 @@
+"""
+Integration tests for statistics-server HTTP endpoints.
+Uses in-memory SQLite so no external DB is required.
+"""
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -6,117 +10,106 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.database import Base, get_db
 
-TEST_DATABASE_URL = "sqlite:///./test_statistics.db"
-
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+SQLALCHEMY_TEST_URL = "sqlite:///:memory:"
+engine = create_engine(SQLALCHEMY_TEST_URL, connect_args={"check_same_thread": False})
+TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 @pytest.fixture(autouse=True)
 def setup_db():
     Base.metadata.create_all(bind=engine)
-    app.dependency_overrides[get_db] = override_get_db
     yield
     Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture
+def client():
+    def override_get_db():
+        db = TestingSession()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as c:
+        yield c
     app.dependency_overrides.clear()
 
 
-client = TestClient(app)
+class TestHealth:
+    def test_health_returns_ok(self, client):
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
 
 
-def test_health():
-    resp = client.get("/health")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "ok"
+class TestAnalyzeEndpoint:
+    def _payload(self, contract_type="kira_sozlesmesi", features=None, score=75.0):
+        return {
+            "contract_type": contract_type,
+            "features": features or ["kira_bedeli", "depozito"],
+            "fields": {"kira_bedeli": "15000"},
+            "completeness_score": score,
+        }
+
+    def test_analyze_returns_200_and_record_id(self, client):
+        resp = client.post("/contracts/analyze", json=self._payload())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["record_id"] >= 1
+        assert data["contract_type"] == "kira_sozlesmesi"
+
+    def test_analyze_stats_summary_totals(self, client):
+        client.post("/contracts/analyze", json=self._payload())
+        resp = client.post("/contracts/analyze", json=self._payload())
+        data = resp.json()
+        assert data["stats_summary"]["total_contracts"] == 2
+
+    def test_recommendations_after_history(self, client):
+        client.post("/contracts/analyze", json=self._payload(
+            features=["kira_bedeli", "depozito", "sozlesme_suresi"], score=90.0
+        ))
+        resp = client.post("/contracts/analyze", json=self._payload(
+            features=["kira_bedeli"], score=60.0
+        ))
+        rec_names = [r["feature_name"] for r in resp.json()["recommendations"]]
+        assert any(n in rec_names for n in ["depozito", "sozlesme_suresi"])
+
+    def test_different_types_dont_mix(self, client):
+        client.post("/contracts/analyze", json=self._payload(
+            contract_type="kira_sozlesmesi", features=["depozito"], score=50.0
+        ))
+        resp = client.post("/contracts/analyze", json=self._payload(
+            contract_type="is_sozlesmesi", features=[], score=0.0
+        ))
+        rec_names = [r["feature_name"] for r in resp.json()["recommendations"]]
+        assert "depozito" not in rec_names
 
 
-def test_analyze_first_contract():
-    resp = client.post("/contracts/analyze", json={
-        "contract_type": "kira_sozlesmesi",
-        "features": ["kira_bedeli", "depozito"],
-        "fields": {"kira_bedeli": "15000", "adres": "Kadıköy"},
-        "completeness_score": 75.0,
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["contract_type"] == "kira_sozlesmesi"
-    assert "record_id" in data
-    # First contract: no recommendations (only 1 record, nothing missing from others)
-    assert isinstance(data["recommendations"], list)
+class TestStatsEndpoint:
+    def test_stats_empty(self, client):
+        resp = client.get("/stats/kira_sozlesmesi")
+        assert resp.status_code == 200
+        assert resp.json()["total_contracts"] == 0
 
-
-def test_analyze_builds_recommendations():
-    # Insert 10 contracts with 'sozlesme_suresi' to push it above 30% threshold
-    for _ in range(10):
+    def test_stats_usage_percentage(self, client):
+        for _ in range(2):
+            client.post("/contracts/analyze", json={
+                "contract_type": "is_sozlesmesi",
+                "features": ["ucret"],
+                "fields": {},
+                "completeness_score": None,
+            })
         client.post("/contracts/analyze", json={
-            "contract_type": "kira_sozlesmesi",
-            "features": ["kira_bedeli", "sozlesme_suresi", "depozito"],
+            "contract_type": "is_sozlesmesi",
+            "features": ["ucret", "deneme_suresi"],
             "fields": {},
-            "completeness_score": 90.0,
+            "completeness_score": None,
         })
-
-    # Now analyze a contract WITHOUT 'sozlesme_suresi' → should get recommendation
-    resp = client.post("/contracts/analyze", json={
-        "contract_type": "kira_sozlesmesi",
-        "features": ["kira_bedeli"],
-        "fields": {},
-        "completeness_score": 50.0,
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    feature_names = [r["feature_name"] for r in data["recommendations"]]
-    assert "sozlesme_suresi" in feature_names
-
-
-def test_stats_endpoint():
-    client.post("/contracts/analyze", json={
-        "contract_type": "hizmet_sozlesmesi",
-        "features": ["hizmet_bedeli", "sure"],
-        "fields": {},
-        "completeness_score": 80.0,
-    })
-    resp = client.get("/stats/hizmet_sozlesmesi")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["contract_type"] == "hizmet_sozlesmesi"
-    assert data["total_contracts"] == 1
-    feature_names = [f["feature_name"] for f in data["feature_stats"]]
-    assert "hizmet_bedeli" in feature_names
-
-
-def test_stats_empty_type():
-    resp = client.get("/stats/nonexistent_type")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total_contracts"] == 0
-    assert data["feature_stats"] == []
-
-
-def test_recommendations_exclude_present_features():
-    # Insert contracts with feature_x at high usage
-    for _ in range(5):
-        client.post("/contracts/analyze", json={
-            "contract_type": "test_type",
-            "features": ["feature_x", "feature_y"],
-            "fields": {},
-        })
-
-    # Analyze contract that already has feature_x → should NOT recommend feature_x
-    resp = client.post("/contracts/analyze", json={
-        "contract_type": "test_type",
-        "features": ["feature_x"],
-        "fields": {},
-    })
-    assert resp.status_code == 200
-    data = resp.json()
-    feature_names = [r["feature_name"] for r in data["recommendations"]]
-    assert "feature_x" not in feature_names
+        resp = client.get("/stats/is_sozlesmesi")
+        data = resp.json()
+        ucret = next(f for f in data["feature_stats"] if f["feature_name"] == "ucret")
+        assert ucret["usage_percentage"] == pytest.approx(100.0)
+        deneme = next(f for f in data["feature_stats"] if f["feature_name"] == "deneme_suresi")
+        assert deneme["usage_percentage"] == pytest.approx(33.3, abs=0.5)

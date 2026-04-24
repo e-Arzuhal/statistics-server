@@ -98,21 +98,33 @@ Sözleşme tipi için istatistikleri getir.
 
 ## Öneri Mantığı (Açıklanabilir AI)
 
+İki katmanlı öneri motoru kullanılır:
+
+### 1. Frequency-Based (İstatistiksel)
 ```
 usage_percentage = (bu_ozellige_sahip_sozlesmeler / ayni_tipteki_toplam) x 100
 
 Öneri koşulları:
   usage_percentage >= threshold (varsayılan: %30, env: RECOMMENDATION_THRESHOLD)
   AND özellik mevcut sözleşmede YOK
-
-Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan: 5)
 ```
 
-Her öneri, neden üretildiğini makine tarafından okunabilir `reason` alanıyla döner:
+### 2. Jaccard-Weighted Collaborative Filtering
+```
+jaccard(A, B) = |A ∩ B| / |A ∪ B|
+
+Her geçmiş sözleşme için Jaccard(mevcut_özellikler, geçmiş_özellikler) hesaplanır.
+Özellik puanları bu benzerlik ağırlığıyla biriktirilir.
+Daha benzer sözleşmelerin özellikleri daha yüksek ağırlık alır.
+```
+
+Sonuçlar birleştirilir: Jaccard önerileri öncelikli, frequency önerileri tamamlayıcı.
+
+Her öneri `reason` alanıyla açıklanır:
 ```
 "reason": "statistical_frequency:87.5%_of_8_contracts"
+"reason": "jaccard_weighted_frequency:72.3%_similarity_weighted"
 ```
-Bu alan UI'da "Bu madde neden önerildi?" sorusuna cevap verir ve jüri sunumunda açıklanabilir AI kanıtı olarak kullanılabilir.
 
 ## Veritabanı Profilleri
 
@@ -143,7 +155,7 @@ Aynı `request_id`, main-server ve diğer servislerin loglarında da görünür 
 | Değişken | Varsayılan | Açıklama |
 |----------|-----------|----------|
 | `DATABASE_URL` | `sqlite:///./statistics.db` | DB bağlantı dizesi |
-| `DEBUG` | `true` | Swagger UI + detaylı log |
+| `DEBUG` | `false` | `true` → Swagger UI açılır (yalnızca geliştirme) |
 | `ALLOWED_ORIGINS` | `http://localhost:8080` | CORS whitelist |
 | `INTERNAL_API_KEY` | _(boş)_ | Prod'da main-server ile aynı olmalı |
 | `RECOMMENDATION_THRESHOLD` | `30.0` | Öneri eşiği (%) |
@@ -154,8 +166,11 @@ Aynı `request_id`, main-server ve diğer servislerin loglarında da görünür 
 ## Güvenlik
 
 - `ALLOWED_ORIGINS` prod'da yalnızca `main-server` adresi olmalı — frontend doğrudan erişemez.
-- `INTERNAL_API_KEY` set edilmemişse (dev) kontrol atlanır; set edilmişse `X-Internal-API-Key` header zorunlu.
-- `DEBUG=false` (prod): Swagger devre dışı.
+- `INTERNAL_API_KEY` set + doğru header → izin verilir
+- `INTERNAL_API_KEY` set + yanlış/eksik header → **401**
+- `INTERNAL_API_KEY` boş + `DEBUG=true` → izin verilir (dev modu)
+- `INTERNAL_API_KEY` boş + `DEBUG=false` → **503** (yanlış yapılandırma; production'da başlamayı da engeller)
+- `DEBUG=false` (varsayılan): Swagger devre dışı.
 
 ---
 

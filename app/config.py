@@ -6,7 +6,7 @@ from typing import List
 class Settings(BaseSettings):
     app_name: str = "e-Arzuhal Statistics Service"
     app_version: str = "1.0.0"
-    debug: bool = True
+    debug: bool = False
     app_env: str = "development"
 
     database_url: str = "sqlite:///./statistics.db"

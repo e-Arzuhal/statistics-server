@@ -14,8 +14,8 @@ from .config import get_settings
 from .database import get_db, create_tables
 from .schemas import (AnalyzeRequest, AnalyzeResponse, StatsResponse, HealthResponse,
                       FeatureStat, ExplanationSupportResponse, ClauseUsageStat)
-from .crud import create_record, get_stats, get_explanation_support
-from .services.recommendation import compute_recommendations
+from .crud import create_record, get_records_by_type, get_stats, get_explanation_support
+from .services.recommendation import compute_recommendations, compute_jaccard_recommendations
 
 settings = get_settings()
 
@@ -98,12 +98,24 @@ def analyze_contract(req: AnalyzeRequest, db: Session = Depends(get_db)):
     # Compute statistics (after inserting, so current contract is included)
     stats = get_stats(db, req.contract_type)
 
-    # Generate recommendations (exclude features already in this contract)
-    recommendations = compute_recommendations(
+    # Frequency-based recommendations
+    freq_recs = compute_recommendations(
         current_features=req.features,
         feature_counts=stats["feature_counts"],
         total=stats["total"],
     )
+
+    # Jaccard-weighted recommendations (benzer sözleşmelere ağırlık verir)
+    all_records = get_records_by_type(db, req.contract_type)
+    jaccard_recs = compute_jaccard_recommendations(
+        current_features=req.features,
+        all_records=[r.features for r in all_records if r.features],
+    )
+
+    # Birleştir: Jaccard önerilerini önceliklendir, geri kalan frequency önerilerini ekle
+    seen: set[str] = {r.feature_name for r in jaccard_recs}
+    combined = jaccard_recs + [r for r in freq_recs if r.feature_name not in seen]
+    recommendations = combined[:10]
 
     return AnalyzeResponse(
         contract_type=req.contract_type,
