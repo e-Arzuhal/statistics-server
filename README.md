@@ -77,7 +77,10 @@ Sözleşme kaydını sakla ve önerileri al.
     {
       "feature_name": "sozlesme_suresi",
       "usage_percentage": 87.5,
-      "message": "Bu alan benzer sözleşmelerin %87.5'inde yer alıyor."
+      "count": 7,
+      "total": 8,
+      "message": "Bu alan benzer sözleşmelerin %87.5'inde yer alıyor. Eklemeyi düşünebilirsiniz.",
+      "reason": "statistical_frequency:87.5%_of_8_contracts"
     }
   ],
   "stats_summary": {
@@ -93,17 +96,57 @@ Sözleşme tipi için istatistikleri getir.
 
 ---
 
-## Öneri Mantığı
+## Öneri Mantığı (Açıklanabilir AI)
 
+İki katmanlı öneri motoru kullanılır:
+
+### 1. Frequency-Based (İstatistiksel)
 ```
 usage_percentage = (bu_ozellige_sahip_sozlesmeler / ayni_tipteki_toplam) x 100
 
 Öneri koşulları:
-  usage_percentage >= threshold (varsayılan: %30)
+  usage_percentage >= threshold (varsayılan: %30, env: RECOMMENDATION_THRESHOLD)
   AND özellik mevcut sözleşmede YOK
-
-Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan: 5)
 ```
+
+### 2. Jaccard-Weighted Collaborative Filtering
+```
+jaccard(A, B) = |A ∩ B| / |A ∪ B|
+
+Her geçmiş sözleşme için Jaccard(mevcut_özellikler, geçmiş_özellikler) hesaplanır.
+Özellik puanları bu benzerlik ağırlığıyla biriktirilir.
+Daha benzer sözleşmelerin özellikleri daha yüksek ağırlık alır.
+```
+
+Sonuçlar birleştirilir: Jaccard önerileri öncelikli, frequency önerileri tamamlayıcı.
+
+Her öneri `reason` alanıyla açıklanır:
+```
+"reason": "statistical_frequency:87.5%_of_8_contracts"
+"reason": "jaccard_weighted_frequency:72.3%_similarity_weighted"
+```
+
+## Veritabanı Profilleri
+
+| Ortam | `DATABASE_URL` | Notlar |
+|-------|---------------|--------|
+| development | `sqlite:///./statistics.db` | Sıfır kurulum |
+| production | `postgresql://user:pass@host/db` | `APP_ENV=production` iken SQLite yasak; config.py hata fırlatır |
+
+Migration çalıştırma:
+```bash
+alembic upgrade head     # son migration'ı uygula
+alembic history          # migration geçmişi
+alembic downgrade -1     # bir geri al
+```
+
+## Observability
+
+Her istek `X-Request-ID` ile loglanır:
+```
+INFO  http_request service=statistics method=POST path=/contracts/analyze status=200 ms=12 request_id=3fa2c1d8
+```
+Aynı `request_id`, main-server ve diğer servislerin loglarında da görünür (dağıtık istek izleme).
 
 ---
 
@@ -112,7 +155,7 @@ Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan
 | Değişken | Varsayılan | Açıklama |
 |----------|-----------|----------|
 | `DATABASE_URL` | `sqlite:///./statistics.db` | DB bağlantı dizesi |
-| `DEBUG` | `true` | Swagger UI + detaylı log |
+| `DEBUG` | `false` | `true` → Swagger UI açılır (yalnızca geliştirme) |
 | `ALLOWED_ORIGINS` | `http://localhost:8080` | CORS whitelist |
 | `INTERNAL_API_KEY` | _(boş)_ | Prod'da main-server ile aynı olmalı |
 | `RECOMMENDATION_THRESHOLD` | `30.0` | Öneri eşiği (%) |
@@ -123,8 +166,11 @@ Azalan usage_percentage'a göre sırala, en fazla N öneri döndür (varsayılan
 ## Güvenlik
 
 - `ALLOWED_ORIGINS` prod'da yalnızca `main-server` adresi olmalı — frontend doğrudan erişemez.
-- `INTERNAL_API_KEY` set edilmemişse (dev) kontrol atlanır; set edilmişse `X-Internal-API-Key` header zorunlu.
-- `DEBUG=false` (prod): Swagger devre dışı.
+- `INTERNAL_API_KEY` set + doğru header → izin verilir
+- `INTERNAL_API_KEY` set + yanlış/eksik header → **401**
+- `INTERNAL_API_KEY` boş + `DEBUG=true` → izin verilir (dev modu)
+- `INTERNAL_API_KEY` boş + `DEBUG=false` → **503** (yanlış yapılandırma; production'da başlamayı da engeller)
+- `DEBUG=false` (varsayılan): Swagger devre dışı.
 
 ---
 
