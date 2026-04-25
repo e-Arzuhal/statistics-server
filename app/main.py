@@ -3,7 +3,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -14,7 +14,7 @@ from .config import get_settings
 from .database import get_db, create_tables
 from .schemas import (AnalyzeRequest, AnalyzeResponse, StatsResponse, HealthResponse,
                       FeatureStat, ExplanationSupportResponse, ClauseUsageStat)
-from .crud import create_record, get_records_by_type, get_stats, get_explanation_support
+from .crud import create_record, get_records_by_type, get_stats, get_explanation_support, mark_latest_outcome
 from .services.recommendation import compute_recommendations, compute_jaccard_recommendations
 
 settings = get_settings()
@@ -190,3 +190,17 @@ def get_explanation_support_stats(contract_type: str, db: Session = Depends(get_
         optional_clause_selection_rate=data["optional_clause_selection_rate"],
         approval_completion_rate=data["approval_completion_rate"],
     )
+
+
+@app.post("/stats/{contract_type}/mark-outcome", status_code=204, tags=["Statistics"])
+def mark_contract_outcome(
+    contract_type: str,
+    approved: bool = Body(..., embed=True),
+    db: Session = Depends(get_db),
+):
+    """
+    Sözleşme onay/ret sonucunu istatistiklere yansıtır.
+    O tip için en son işlemsiz (approval_completed=NULL) kaydı günceller.
+    main-server tarafından approve()/reject() akışında fire-and-forget olarak çağrılır.
+    """
+    mark_latest_outcome(db, contract_type, approved)

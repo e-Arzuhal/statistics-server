@@ -54,6 +54,27 @@ def get_stats(db: Session, contract_type: str) -> dict:
     }
 
 
+def mark_latest_outcome(db: Session, contract_type: str, approved: bool) -> bool:
+    """
+    Verilen sözleşme tipi için en son işlemsiz kaydı onay/ret sonucuyla günceller.
+    Kayıt bulunamazsa False döner (sessiz başarısızlık — fire-and-forget çağrısı için).
+    """
+    record = (
+        db.query(ContractRecord)
+        .filter(
+            ContractRecord.contract_type == contract_type,
+            ContractRecord.approval_completed.is_(None),
+        )
+        .order_by(ContractRecord.analyzed_at.desc())
+        .first()
+    )
+    if record is None:
+        return False
+    record.approval_completed = approved
+    db.commit()
+    return True
+
+
 def get_explanation_support(db: Session, contract_type: str) -> dict:
     """
     Açıklama desteği için zenginleştirilmiş istatistikler.
