@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:8080"
     internal_api_key: str = ""
 
+    host: str = "0.0.0.0"
+    port: int = 8002
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.allowed_origins.split(",")]
