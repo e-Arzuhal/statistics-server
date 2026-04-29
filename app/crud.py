@@ -59,6 +59,8 @@ def mark_latest_outcome(db: Session, contract_type: str, approved: bool) -> bool
     Verilen sözleşme tipi için en son işlemsiz kaydı onay/ret sonucuyla günceller.
     Kayıt bulunamazsa False döner (sessiz başarısızlık — fire-and-forget çağrısı için).
     """
+    if not contract_type:
+        return False
     record = (
         db.query(ContractRecord)
         .filter(

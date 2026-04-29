@@ -202,5 +202,19 @@ def mark_contract_outcome(
     Sözleşme onay/ret sonucunu istatistiklere yansıtır.
     O tip için en son işlemsiz (approval_completed=NULL) kaydı günceller.
     main-server tarafından approve()/reject() akışında fire-and-forget olarak çağrılır.
+
+    Idempotent: kayıt yoksa veya update başarısız olursa 204 döner — bu endpoint
+    fire-and-forget olduğu için 500 verirse main-server log'larında gürültü oluşur.
     """
-    mark_latest_outcome(db, contract_type, approved)
+    try:
+        mark_latest_outcome(db, contract_type, approved)
+    except Exception as exc:
+        logger.warning(
+            "mark_latest_outcome başarısız contract_type=%s approved=%s err=%s",
+            contract_type, approved, exc,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return None
