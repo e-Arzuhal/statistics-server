@@ -6,7 +6,9 @@ from datetime import datetime
 class AnalyzeRequest(BaseModel):
     contract_type: str = Field(..., min_length=1, max_length=64, description="Type of the contract (e.g. kira_sozlesmesi)")
     features: list[str] = Field(default_factory=list, max_length=200, description="Feature names present in this contract")
-    fields: dict = Field(default_factory=dict, max_length=200, description="Extracted field values")
+    # NOTE: pydantic v2 dict alanlarda `max_length` desteklemediği için kaldırıldı.
+    # Bu alan main-server tarafından genelde boş ({}) gönderilir.
+    fields: dict = Field(default_factory=dict, description="Extracted field values")
     completeness_score: Optional[float] = Field(None, ge=0, le=100)
 
     # ── Hafta 2 ──────────────────────────────────────────────────────────────
