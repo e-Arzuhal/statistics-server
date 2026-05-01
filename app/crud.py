@@ -1,11 +1,17 @@
+import logging
+
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from .models import ContractRecord
 from .schemas import AnalyzeRequest
+from .database import _apply_runtime_migrations
+
+logger = logging.getLogger(__name__)
 
 
-def create_record(db: Session, req: AnalyzeRequest) -> ContractRecord:
-    record = ContractRecord(
+def _build_record(req: AnalyzeRequest) -> ContractRecord:
+    return ContractRecord(
         contract_type=req.contract_type,
         features=req.features,
         fields=req.fields,
@@ -15,10 +21,46 @@ def create_record(db: Session, req: AnalyzeRequest) -> ContractRecord:
         optional_clauses_offered=req.optional_clauses_offered,
         optional_clauses_selected=req.optional_clauses_selected,
     )
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return record
+
+
+def create_record(db: Session, req: AnalyzeRequest) -> ContractRecord:
+    """
+    INSERT öncesinde DB şemasının güncel olduğunu varsayar; ancak bir
+    "no such column" hatası çıkarsa bu, eski DB dosyasının runtime
+    migration'a tabi tutulmadığı anlamına gelir. Bu durumda migration'ı
+    bir kez daha çağırıp INSERT'i tekrarlıyoruz — startup migration
+    çalışmadığı veya başarısız olduğu corner-case'i bu şekilde örtüyoruz.
+    """
+    try:
+        record = _build_record(req)
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
+    except OperationalError as e:
+        msg = str(e.orig if hasattr(e, "orig") and e.orig else e)
+        if "no such column" not in msg.lower() and "no column named" not in msg.lower():
+            raise
+        logger.warning(
+            "create_record failed with missing-column error (%s); "
+            "running runtime migrations and retrying once",
+            msg,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        try:
+            _apply_runtime_migrations()
+        except Exception as mig_err:
+            logger.error("Runtime migration retry failed: %s", mig_err)
+            raise
+
+        record = _build_record(req)
+        db.add(record)
+        db.commit()
+        db.refresh(record)
+        return record
 
 
 def get_records_by_type(db: Session, contract_type: str) -> list[ContractRecord]:
