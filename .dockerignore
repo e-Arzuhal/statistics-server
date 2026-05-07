@@ -1,0 +1,44 @@
+# Byte-compiled
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual envs
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test / Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+tests/
+
+# Git
+.git/
+.gitignore
+
+# Local development
+.env
+.env.local
+.env.*
+!.env.example
+
+# Docs
+*.md
+
+# Local SQLite DB (use volume in container)
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Misc
+*.pkl
+*.joblib
